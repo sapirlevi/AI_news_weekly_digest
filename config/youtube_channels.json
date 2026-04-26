@@ -1,0 +1,24 @@
+{
+  "channels": [
+    "https://www.youtube.com/@TinaHuang1",
+    "https://www.youtube.com/@nateherk",
+    "https://www.youtube.com/@intheworldofai",
+    "https://www.youtube.com/@freecodecamp",
+    "https://www.youtube.com/@TechWithTim",
+    "https://www.youtube.com/@nicksaraev",
+    "https://www.youtube.com/@futurepedia_io",
+    "https://www.youtube.com/@aniketapanjwani",
+    "https://www.youtube.com/@GregIsenberg"
+  ],
+  "providers": {
+    "Anthropic":       {"rss": null,                                              "homepage": "https://www.anthropic.com/news"},
+    "OpenAI":          {"rss": "https://openai.com/news/rss.xml",                  "homepage": "https://openai.com/news/"},
+    "Google DeepMind": {"rss": "https://deepmind.google/blog/rss.xml",            "homepage": "https://deepmind.google/discover/blog/"},
+    "Google AI Blog":  {"rss": "https://blog.google/technology/ai/rss/",          "homepage": "https://blog.google/technology/ai/"},
+    "Meta AI":         {"rss": null,                                              "homepage": "https://ai.meta.com/blog/"},
+    "xAI":             {"rss": null,                                              "homepage": "https://x.ai/news"},
+    "Mistral":         {"rss": null,                                              "homepage": "https://mistral.ai/news/"},
+    "Perplexity":      {"rss": null,                                              "homepage": "https://www.perplexity.ai/hub/blog"},
+    "Cohere":          {"rss": null,                                              "homepage": "https://cohere.com/blog"}
+  }
+}

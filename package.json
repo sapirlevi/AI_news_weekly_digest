@@ -1,0 +1,11 @@
+{
+  "name": "ai-news-weekly-digest",
+  "version": "1.0.0",
+  "description": "Weekly AI news digest generator — scrapes provider news and YouTube, summarizes with Gemini, builds a PowerPoint deck, and emails it.",
+  "scripts": {
+    "build-pptx": "node tools/build_pptx_v2.js"
+  },
+  "dependencies": {
+    "pptxgenjs": "^3.12.0"
+  }
+}
