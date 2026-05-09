@@ -32,7 +32,17 @@ def main():
         print(f"[{vid}] {v['title'][:70]}")
         try:
             fetched = YouTubeTranscriptApi().fetch(vid, languages=["en", "en-US", "en-GB"])
-            text = " ".join(s.text for s in fetched if s.text).strip()
+            parts = []
+            last_marker = -1e9
+            for snip in fetched:
+                if not snip.text:
+                    continue
+                start = float(getattr(snip, "start", 0) or 0)
+                if start - last_marker >= 30:
+                    parts.append(f"[t={int(start)}s]")
+                    last_marker = start
+                parts.append(snip.text)
+            text = " ".join(parts).strip()
             if not text:
                 print("  empty transcript, skipping")
                 continue

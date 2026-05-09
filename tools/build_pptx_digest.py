@@ -229,6 +229,36 @@ def tips_slide(prs, title, subtitle, items, formatter):
     add_bullets(s, bullets, Inches(0.7), Inches(1.3), Inches(12.2), Inches(5.8), size=14)
 
 
+def tools_and_tips_slide(prs, items):
+    if not items:
+        return
+    per_page = 6
+    pages = [items[i:i + per_page] for i in range(0, len(items), per_page)]
+    total = len(pages)
+    for idx, chunk in enumerate(pages, 1):
+        s = blank_slide(prs)
+        suffix = f"  ({idx}/{total})" if total > 1 else ""
+        add_header_bar(s,
+                       f"Tools, Prompts & Setup Tips Worth Trying{suffix}",
+                       "Hands-on recommendations — click any tip to jump to the source")
+        accent_stripe(s)
+        top = Inches(1.3)
+        left = Inches(0.7)
+        width = Inches(12.2)
+        for it in chunk:
+            url = it.get("url") or None
+            title = it.get("title", "")
+            what = it.get("what", "")
+            source = it.get("source", "")
+            add_text(s, f"•  {title}", left, top, width, Inches(0.34),
+                     size=14, bold=True, color=NAVY, hyperlink=url)
+            sub_parts = [p for p in [what, f"({source})" if source else ""] if p]
+            sub = "  ".join(sub_parts)
+            add_text(s, sub, left + Inches(0.25), top + Inches(0.32),
+                     width - Inches(0.25), Inches(0.5), size=11, color=MUTED)
+            top += Inches(0.95)
+
+
 def chart_png(fig):
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="white")
@@ -322,16 +352,7 @@ def main():
     summary_slide(prs, digest.get("executive_summary", []))
     top_stories_slides(prs, digest.get("top_stories", []))
     trending_videos_slide(prs, digest.get("trending_videos", []), videos_by_id)
-    tips_slide(prs, "Prompt & Setup Tips",
-               "Distilled from video transcripts this week",
-               digest.get("prompt_tips", []),
-               lambda t: f"{t.get('tip','')}   ({t.get('source_channel','')})"
-                         + (f" — e.g. {t['example']}" if t.get("example") else ""))
-    tips_slide(prs, "Tools & Setups Worth Trying",
-               "Hands-on recommendations for your vibe-coding stack",
-               digest.get("tools_setups", []),
-               lambda t: f"{t.get('tool_or_setup','')} — {t.get('use_case','')}"
-                         + (f"  ({t['source']})" if t.get("source") else ""))
+    tools_and_tips_slide(prs, digest.get("tools_and_tips", []))
     charts_slide(prs, videos_raw, news_raw)
     sources_slide(prs,
                   digest.get("top_stories", []),

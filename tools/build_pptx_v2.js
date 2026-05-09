@@ -89,7 +89,7 @@ function headerBar(slide, title, subtitle) {
     x: 0.62, y: 3.25, w: 6.8, h: 0.38,
     fontSize: 15, color: C.mutedDark, fontFace: "Calibri",
   });
-  slide.addText("AI Vendor News  ·  YouTube Trends  ·  Prompt Tips  ·  Tools & Signals", {
+  slide.addText("AI Vendor News  ·  YouTube Trends  ·  Tips & Tools  ·  Industry Signals", {
     x: 0.62, y: 3.72, w: 6.8, h: 0.32,
     fontSize: 12, color: "7A9CBD", fontFace: "Calibri",
   });
@@ -98,8 +98,7 @@ function headerBar(slide, title, subtitle) {
   const stats = [
     { num: `${(digest.top_stories || []).length}`, label: "TOP STORIES" },
     { num: `${(digest.trending_videos || []).length}`, label: "TRENDING VIDEOS" },
-    { num: `${(digest.prompt_tips || []).length}`, label: "PROMPT TIPS" },
-    { num: `${(digest.tools_setups || []).length}`, label: "TOOLS & SETUPS" },
+    { num: `${(digest.tools_and_tips || []).length}`, label: "TIPS & TOOLS" },
   ];
   const statX = 8.1;
   const statW = 4.8;
@@ -293,25 +292,32 @@ function headerBar(slide, title, subtitle) {
   }
 }
 
-// ── SLIDE: PROMPT TIPS ────────────────────────────────────────────────────────
+// ── SLIDE: TOOLS, PROMPTS & SETUP TIPS ────────────────────────────────────────
 {
-  const tips = (digest.prompt_tips || []).slice(0, 4);
-  if (tips.length) {
+  const allTips = digest.tools_and_tips || [];
+  const perPage = 6;
+  const totalPages = Math.max(1, Math.ceil(allTips.length / perPage));
+  for (let p = 0; p < allTips.length; p += perPage) {
+    const chunk = allTips.slice(p, p + perPage);
+    const pageNum = Math.floor(p / perPage) + 1;
     const slide = pres.addSlide();
     slide.background = { color: C.lightBg };
-    headerBar(slide, "Prompt & Setup Tips", "Distilled from video transcripts — click source to watch");
+    const pageLabel = totalPages > 1 ? `  ·  ${pageNum} of ${totalPages}` : "";
+    headerBar(slide, "Tools, Prompts & Setup Tips Worth Trying",
+      `Hands-on recommendations — click any tip to jump to the source${pageLabel}`);
 
     const cols = 2, gapX = 0.3, gapY = 0.18;
     const startX = MARGIN_L;
     const startY = 1.08;
-    const CARD_H = (H - startY - MARGIN_B - gapY) / 2;
+    const rows = Math.max(1, Math.ceil(chunk.length / cols));
+    const CARD_H = (H - startY - MARGIN_B - gapY * (rows - 1)) / rows;
     const cardW = (W - startX * 2 - gapX) / cols;
 
-    tips.forEach((tip, i) => {
+    chunk.forEach((tip, i) => {
       const col = i % cols, row = Math.floor(i / cols);
       const x = startX + col * (cardW + gapX);
       const y = startY + row * (CARD_H + gapY);
-      const videoUrl = channelToVideoUrl[tip.source_channel];
+      const url = tip.url || "";
 
       slide.addShape(pres.shapes.RECTANGLE, {
         x, y, w: cardW, h: CARD_H,
@@ -323,77 +329,22 @@ function headerBar(slide, title, subtitle) {
         fill: { color: C.accent }, line: { color: C.accent },
       });
 
-      slide.addText(trunc(tip.tip || "", 160), {
-        x: x + 0.18, y: y + 0.14, w: cardW - 0.36, h: 0.95,
-        fontSize: 13, color: C.navy, fontFace: "Calibri", margin: 0,
-      });
-
-      if (tip.example) {
-        slide.addText(`e.g. ${trunc(tip.example, 100)}`, {
-          x: x + 0.18, y: y + 1.16, w: cardW - 0.36, h: 0.55,
-          fontSize: 9, color: C.muted, italic: true, fontFace: "Calibri", margin: 0,
-        });
-      }
-
-      const sourceRuns = videoUrl
-        ? [{ text: `↗ ${tip.source_channel}`, options: { hyperlink: { url: videoUrl }, color: C.accent, bold: true, fontSize: 9.5 } }]
-        : [{ text: tip.source_channel || "", options: { color: C.muted, fontSize: 9.5 } }];
-      slide.addText(sourceRuns, {
-        x: x + 0.18, y: y + CARD_H - 0.32, w: cardW - 0.36, h: 0.26,
+      const titleOpts = url
+        ? { hyperlink: { url }, bold: true, color: C.navy, fontSize: 14 }
+        : { bold: true, color: C.navy, fontSize: 14 };
+      slide.addText([{ text: trunc(tip.title || "", 90), options: titleOpts }], {
+        x: x + 0.18, y: y + 0.14, w: cardW - 0.36, h: 0.5,
         fontFace: "Calibri", margin: 0,
       });
-    });
-  }
-}
 
-// ── SLIDE: TOOLS & SETUPS ─────────────────────────────────────────────────────
-{
-  const tools = (digest.tools_setups || []).slice(0, 4);
-  if (tools.length) {
-    const slide = pres.addSlide();
-    slide.background = { color: C.lightBg };
-    headerBar(slide, "Tools & Setups Worth Trying", "Hands-on recommendations — click source to watch");
-
-    const cols = 2, gapX = 0.3, gapY = 0.18;
-    const startX = MARGIN_L;
-    const startY = 1.08;
-    const CARD_H = (H - startY - MARGIN_B - gapY) / 2;
-    const cardW = (W - startX * 2 - gapX) / cols;
-
-    tools.forEach((tool, i) => {
-      const col = i % cols, row = Math.floor(i / cols);
-      const x = startX + col * (cardW + gapX);
-      const y = startY + row * (CARD_H + gapY);
-      const videoUrl = channelToVideoUrl[tool.source];
-
-      slide.addShape(pres.shapes.RECTANGLE, {
-        x, y, w: cardW, h: CARD_H,
-        fill: { color: C.white }, line: { color: C.border, width: 1 },
-        shadow: makeShadow(),
+      slide.addText(trunc(tip.what || "", 240), {
+        x: x + 0.18, y: y + 0.66, w: cardW - 0.36, h: CARD_H - 1.0,
+        fontSize: 11, color: "374151", fontFace: "Calibri", margin: 0,
       });
 
-      slide.addShape(pres.shapes.OVAL, {
-        x: x + 0.15, y: y + 0.17, w: 0.42, h: 0.42,
-        fill: { color: C.accent }, line: { color: C.accent },
-      });
-      slide.addText(`${i + 1}`, {
-        x: x + 0.15, y: y + 0.19, w: 0.42, h: 0.38,
-        fontSize: 13, bold: true, color: C.white, fontFace: "Calibri", align: "center", margin: 0,
-      });
-
-      slide.addText(trunc(tool.tool_or_setup || "", 60), {
-        x: x + 0.7, y: y + 0.15, w: cardW - 0.86, h: 0.46,
-        fontSize: 15, bold: true, color: C.navy, fontFace: "Calibri", margin: 0,
-      });
-
-      slide.addText(trunc(tool.use_case || "", 160), {
-        x: x + 0.18, y: y + 0.7, w: cardW - 0.36, h: 1.05,
-        fontSize: 13, color: "374151", fontFace: "Calibri", margin: 0,
-      });
-
-      const sourceRuns = videoUrl
-        ? [{ text: `↗ ${tool.source}`, options: { hyperlink: { url: videoUrl }, color: C.accent, bold: true, fontSize: 9.5 } }]
-        : [{ text: tool.source || "", options: { color: C.muted, fontSize: 9.5 } }];
+      const sourceRuns = url
+        ? [{ text: `↗ ${tip.source || ""}`, options: { hyperlink: { url }, color: C.accent, bold: true, fontSize: 9.5 } }]
+        : [{ text: tip.source || "", options: { color: C.muted, fontSize: 9.5 } }];
       slide.addText(sourceRuns, {
         x: x + 0.18, y: y + CARD_H - 0.32, w: cardW - 0.36, h: 0.26,
         fontFace: "Calibri", margin: 0,

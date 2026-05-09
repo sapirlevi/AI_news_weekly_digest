@@ -1,7 +1,7 @@
 # Workflow: AI Weekly Digest
 
 ## Objective
-Produce a professional `.pptx` slide deck summarizing the past week in AI — top news from major providers, trending videos from a curated YouTube channel list, prompt/setup recommendations distilled from transcripts, and supporting charts — then email it to the user.
+Produce a professional `.pptx` slide deck summarizing the past week in AI — top news from major providers, trending videos from a curated YouTube channel list, tools, prompts and setup tips distilled from transcripts and provider news, each linked to the exact moment / sentence, and supporting charts — then email it to the user.
 
 ## Required inputs
 - `.env` with `YOUTUBE_API_KEY`, `GEMINI_API_KEY`, `FIRECRAWL_API_KEY`, `DIGEST_RECIPIENT_EMAIL`
@@ -51,7 +51,7 @@ python tools/send_gmail.py
 ## Rate limits / quotas to remember
 - YouTube Data API v3: 10,000 units/day free. `playlistItems.list` = 1 unit, `videos.list` = 1 unit, `channels.list` = 1 unit. One full run ~ 30 units.
 - Gemini: free tier on `gemini-2.5-flash` is generous (daily quota well above one digest/week); pro tier used first, falls back to flash on quota/error.
-- Firecrawl: free tier covers ~500 scrapes/month — plenty for ~7 providers × 4 runs/month.
+- Firecrawl: free tier covers ~500 scrapes/month. Per run: ~7 provider homepages + up to 15 article-body scrapes for tip linking ≈ 22 scrapes; 4 runs/month ≈ 88 scrapes.
 - youtube-transcript-api: no key, but can be IP-throttled — keep top-N to ~15.
 
 ## Scheduling

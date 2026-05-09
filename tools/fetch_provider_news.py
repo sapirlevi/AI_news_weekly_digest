@@ -12,7 +12,7 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -60,6 +60,8 @@ def fetch_firecrawl(url, api_key):
 
     Firecrawl returns clean markdown; we extract anchors that look like
     dated articles and attach the nearest ISO date we can find.
+    Only links whose resolved host matches the provider homepage host are kept
+    (prevents cross-promo / off-host links from leaking through).
     """
     r = requests.post(
         "https://api.firecrawl.dev/v2/scrape",
@@ -70,26 +72,51 @@ def fetch_firecrawl(url, api_key):
     r.raise_for_status()
     data = r.json()
     md = (data.get("data") or {}).get("markdown") or data.get("markdown") or ""
+    home_host = urlparse(url).netloc.lower()
     items, seen = [], set()
     for m in MD_LINK_RE.finditer(md):
         title, href = m.group(1).strip(), m.group(2).strip()
-        if href in seen or not title or len(title) < 15:
+        if href in seen or not title or len(title) < 10:
             continue
         if not re.search(r"/(blog|news|research|post|article|hub|discover)/", href, re.I):
             continue
+        abs_url = urljoin(url, href)
+        if urlparse(abs_url).netloc.lower() != home_host:
+            continue  # off-host cross-promo link — skip
         # Look for a date within 200 chars of this link (before or after)
         window = md[max(0, m.start() - 200):m.end() + 200]
         date_match = ISO_DATE_RE.search(window)
         seen.add(href)
         items.append({
             "title": title,
-            "url": urljoin(url, href),
+            "url": abs_url,
             "published": date_match.group(1) if date_match else None,
             "summary": "",
         })
         if len(items) >= MAX_ITEMS_PER_PROVIDER:
             break
+    if not items and md:
+        print(f"  [firecrawl debug] {url}: 0 article links parsed; markdown sample: {md[:500]!r}",
+              file=sys.stderr)
     return items
+
+
+def fetch_article_body(url, api_key, max_chars=3000):
+    """Scrape one article URL with Firecrawl, return body markdown (truncated). '' on failure."""
+    try:
+        r = requests.post(
+            "https://api.firecrawl.dev/v2/scrape",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"url": url, "formats": ["markdown"], "onlyMainContent": True},
+            timeout=60,
+        )
+        r.raise_for_status()
+        data = r.json()
+        md = (data.get("data") or {}).get("markdown") or data.get("markdown") or ""
+        return md[:max_chars]
+    except Exception as e:
+        print(f"  body fetch failed for {url[:80]}: {e}", file=sys.stderr)
+        return ""
 
 
 def within_window(item):
@@ -109,13 +136,17 @@ def main():
     for name, src in providers.items():
         print(f"[{name}]")
         try:
+            raw, method = [], None
             if src.get("rss"):
                 raw = fetch_rss(src["rss"])
                 method = "rss"
-            elif firecrawl_key:
-                raw = fetch_firecrawl(src["homepage"], firecrawl_key)
-                method = "firecrawl"
-            else:
+            # If RSS returned nothing (or wasn't configured), try Firecrawl as fallback
+            if not raw and firecrawl_key and src.get("homepage"):
+                fc = fetch_firecrawl(src["homepage"], firecrawl_key)
+                if len(fc) > len(raw):
+                    raw = fc
+                    method = "firecrawl_fallback" if src.get("rss") else "firecrawl"
+            if method is None:
                 raise RuntimeError("no RSS and FIRECRAWL_API_KEY not set — skipping")
 
             in_window = [i for i in raw if within_window(i) and i.get("title")]
@@ -130,6 +161,32 @@ def main():
         except Exception as e:
             print(f"  FAILED: {e}", file=sys.stderr)
             failures.append({"provider": name, "error": str(e)})
+
+    # Per-provider summary — surface silent zero-item providers
+    print("\nPer-provider counts:")
+    counts_by_provider = {name: 0 for name in providers}
+    for item in all_items:
+        p = item.get("provider", "")
+        if p in counts_by_provider:
+            counts_by_provider[p] += 1
+    for name, count in counts_by_provider.items():
+        flag = "  ⚠ EMPTY — investigate" if count == 0 else ""
+        print(f"  {name:18s} {count:3d} items{flag}")
+        if count == 0:
+            failures.append({"provider": name, "error": "fetched 0 items in window"})
+
+    # Fetch article body for top-15 most-recent items so Gemini can pick a
+    # verbatim phrase for Text Fragment deep-links (#:~:text=...).
+    N_BODIES = 15
+    for item in all_items:
+        item["body"] = ""
+    if firecrawl_key and all_items:
+        sorted_items = sorted(all_items, key=lambda x: x.get("published") or "", reverse=True)
+        for item in sorted_items[:N_BODIES]:
+            if not item.get("url"):
+                continue
+            print(f"  body[{item.get('provider','?')}]: {item['url'][:80]}")
+            item["body"] = fetch_article_body(item["url"], firecrawl_key)
 
     out = {
         "generated_at": now_utc().isoformat(),
