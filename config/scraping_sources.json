@@ -20,5 +20,14 @@
     "Mistral":         {"rss": null,                                              "homepage": "https://mistral.ai/news/"},
     "Perplexity":      {"rss": null,                                              "homepage": "https://www.perplexity.ai/hub/blog"},
     "Cohere":          {"rss": null,                                              "homepage": "https://cohere.com/blog"}
+  },
+  "qa_blogs": {
+    "BugRaptors":              {"rss": null, "homepage": "https://www.bugraptors.com/blogs"},
+    "Software Testing Weekly": {"rss": null, "homepage": "https://softwaretestingweekly.com/"},
+    "QA.com":                  {"rss": null, "homepage": "https://www.qa.com/resources/blog/"},
+    "Rainforest QA":           {"rss": null, "homepage": "https://www.rainforestqa.com/blog/"},
+    "QASource (AI in QA)":     {"rss": null, "homepage": "https://www.qasource.com/blog/topic/ai-qa"},
+    "qa.tech":                 {"rss": null, "homepage": "https://www.qa.tech/blog"},
+    "Tricentis":               {"rss": null, "homepage": "https://www.tricentis.com/blog"}
   }
 }

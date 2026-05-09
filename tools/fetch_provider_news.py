@@ -66,7 +66,7 @@ def fetch_firecrawl(url, api_key):
     r = requests.post(
         "https://api.firecrawl.dev/v2/scrape",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"url": url, "formats": ["markdown"], "onlyMainContent": True},
+        json={"url": url, "formats": ["markdown"], "onlyMainContent": False},
         timeout=60,
     )
     r.raise_for_status()
@@ -78,7 +78,7 @@ def fetch_firecrawl(url, api_key):
         title, href = m.group(1).strip(), m.group(2).strip()
         if href in seen or not title or len(title) < 10:
             continue
-        if not re.search(r"/(blog|news|research|post|article|hub|discover)/", href, re.I):
+        if not re.search(r"/(blogs?|news|research|post|article|hub|discover)/", href, re.I):
             continue
         abs_url = urljoin(url, href)
         if urlparse(abs_url).netloc.lower() != home_host:
@@ -126,62 +126,114 @@ def within_window(item):
     return dt >= WINDOW
 
 
-def main():
-    cfg = read_json(CONFIG / "youtube_channels.json")
-    providers = cfg["providers"]
-    firecrawl_key = os.environ.get("FIRECRAWL_API_KEY")
-    seen_urls = read_seen()["provider_urls"]
-
-    all_items, failures, total_skipped = [], [], 0
-    for name, src in providers.items():
-        print(f"[{name}]")
+def _fetch_source_set(sources, category, window, firecrawl_key, seen_urls):
+    """Fetch a {name: {rss, homepage}} mapping. Returns (kept_items, failures, skipped_count)."""
+    kept_all, failures, skipped_total = [], [], 0
+    for name, src in sources.items():
+        print(f"[{category}/{name}]")
         try:
             raw, method = [], None
             if src.get("rss"):
                 raw = fetch_rss(src["rss"])
                 method = "rss"
-            # If RSS returned nothing (or wasn't configured), try Firecrawl as fallback
             if not raw and firecrawl_key and src.get("homepage"):
                 fc = fetch_firecrawl(src["homepage"], firecrawl_key)
+                method = "firecrawl_fallback" if src.get("rss") else "firecrawl"
                 if len(fc) > len(raw):
                     raw = fc
-                    method = "firecrawl_fallback" if src.get("rss") else "firecrawl"
             if method is None:
                 raise RuntimeError("no RSS and FIRECRAWL_API_KEY not set — skipping")
 
-            in_window = [i for i in raw if within_window(i) and i.get("title")]
+            in_window = [i for i in raw
+                         if (parse_dt(i.get("published")) or window) >= window
+                         and i.get("title")]
             kept = [i for i in in_window if i.get("url") not in seen_urls]
             skipped = len(in_window) - len(kept)
-            total_skipped += skipped
+            skipped_total += skipped
             for i in kept:
                 i["provider"] = name
+                i["category"] = category
                 i["source_method"] = method
-            print(f"  [{method}] {len(kept)} item(s) in window (of {len(raw)} fetched, {skipped} already-delivered)")
-            all_items.extend(kept)
+            print(f"  [{method}] {len(kept)} item(s) in window "
+                  f"(of {len(raw)} fetched, {skipped} already-delivered)")
+            kept_all.extend(kept)
         except Exception as e:
             print(f"  FAILED: {e}", file=sys.stderr)
-            failures.append({"provider": name, "error": str(e)})
+            failures.append({"provider": name, "category": category, "error": str(e)})
+    return kept_all, failures, skipped_total
 
-    # Per-provider summary — surface silent zero-item providers
-    print("\nPer-provider counts:")
-    counts_by_provider = {name: 0 for name in providers}
-    for item in all_items:
-        p = item.get("provider", "")
-        if p in counts_by_provider:
-            counts_by_provider[p] += 1
-    for name, count in counts_by_provider.items():
-        flag = "  ⚠ EMPTY — investigate" if count == 0 else ""
-        print(f"  {name:18s} {count:3d} items{flag}")
-        if count == 0:
-            failures.append({"provider": name, "error": "fetched 0 items in window"})
 
-    # Fetch article body for top-15 most-recent items so Gemini can pick a
+class _Tee:
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, data):
+        for s in self._streams:
+            s.write(data)
+
+    def flush(self):
+        for s in self._streams:
+            s.flush()
+
+
+def main():
+    log_path = TMP / "fetch_provider_news.log"
+    with open(log_path, "w") as _log:
+        _orig_out, _orig_err = sys.stdout, sys.stderr
+        sys.stdout = _Tee(_orig_out, _log)
+        sys.stderr = _Tee(_orig_err, _log)
+        try:
+            _main()
+        finally:
+            sys.stdout = _orig_out
+            sys.stderr = _orig_err
+
+
+def _main():
+    cfg = read_json(CONFIG / "scraping_sources.json")
+    providers = cfg["providers"]
+    qa_blogs = cfg.get("qa_blogs", {})
+    firecrawl_key = os.environ.get("FIRECRAWL_API_KEY")
+    seen_urls = read_seen()["provider_urls"]
+
+    general_window = days_ago(7)
+    qa_window = days_ago(14)
+
+    gen_items, gen_fail, gen_skipped = _fetch_source_set(
+        providers, "general", general_window, firecrawl_key, seen_urls)
+    qa_items, qa_fail, qa_skipped = _fetch_source_set(
+        qa_blogs, "qa", qa_window, firecrawl_key, seen_urls)
+
+    all_items = gen_items + qa_items
+    failures = gen_fail + qa_fail
+    total_skipped = gen_skipped + qa_skipped
+
+    # Per-source summary grouped by category
+    print("\nPer-source counts:")
+    for category, srcs in [("general", providers), ("qa", qa_blogs)]:
+        print(f"  --- {category} ---")
+        counts = {name: 0 for name in srcs}
+        for item in all_items:
+            if item.get("category") == category and item.get("provider") in counts:
+                counts[item["provider"]] += 1
+        for name, count in counts.items():
+            flag = "  ⚠ EMPTY — investigate" if count == 0 else ""
+            if category == "qa" and name == "BugRaptors" and count == 0:
+                flag = "  ⚠ BUGRAPTORS EMPTY — user flagged as #1 priority, verify scraping"
+            print(f"    {name:28s} {count:3d} items{flag}")
+            if count == 0:
+                failures.append({"provider": name, "category": category,
+                                 "error": "fetched 0 items in window"})
+
+    # Fetch article body for top-15 most-recent GENERAL items so Gemini can pick a
     # verbatim phrase for Text Fragment deep-links (#:~:text=...).
+    # QA items are skipped — their slide uses direct article URLs, no text fragments.
     N_BODIES = 15
     for item in all_items:
         item["body"] = ""
     if firecrawl_key and all_items:
-        sorted_items = sorted(all_items, key=lambda x: x.get("published") or "", reverse=True)
+        general_only = [i for i in all_items if i.get("category") == "general"]
+        sorted_items = sorted(general_only, key=lambda x: x.get("published") or "", reverse=True)
         for item in sorted_items[:N_BODIES]:
             if not item.get("url"):
                 continue
@@ -190,13 +242,16 @@ def main():
 
     out = {
         "generated_at": now_utc().isoformat(),
-        "window_start": WINDOW.isoformat(),
+        "window_start": general_window.isoformat(),
+        "qa_window_start": qa_window.isoformat(),
         "items": all_items,
         "failures": failures,
     }
     write_json(TMP / "provider_news.json", out)
-    print(f"Done. {len(all_items)} items, {total_skipped} already-delivered skipped, "
-          f"{len(failures)} provider(s) failed.")
+    print(f"Done. {len(all_items)} items "
+          f"({len(gen_items)} general, {len(qa_items)} qa), "
+          f"{total_skipped} already-delivered skipped, "
+          f"{len(failures)} source(s) failed.")
 
 
 if __name__ == "__main__":

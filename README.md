@@ -40,7 +40,7 @@ Also place your Google OAuth `credentials.json` in the project root (needed for 
 
 ### Configure sources
 
-Edit `config/youtube_channels.json` to set which YouTube channels and AI provider news sources to follow.
+Edit `config/scraping_sources.json` to set which YouTube channels, AI provider blogs, and QA blogs to scrape.
 
 ## Run
 

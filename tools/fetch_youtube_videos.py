@@ -109,7 +109,7 @@ def main():
         print("ERROR: YOUTUBE_API_KEY not set in .env", file=sys.stderr)
         sys.exit(1)
 
-    cfg = read_json(CONFIG / "youtube_channels.json")
+    cfg = read_json(CONFIG / "scraping_sources.json")
     cache = load_cache()
     seen_ids = read_seen()["video_ids"]
     all_videos = []

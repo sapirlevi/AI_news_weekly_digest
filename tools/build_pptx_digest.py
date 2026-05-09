@@ -259,6 +259,36 @@ def tools_and_tips_slide(prs, items):
             top += Inches(0.95)
 
 
+def qa_ai_slide(prs, items):
+    if not items:
+        return
+    per_page = 6
+    pages = [items[i:i + per_page] for i in range(0, len(items), per_page)]
+    total = len(pages)
+    for idx, chunk in enumerate(pages, 1):
+        s = blank_slide(prs)
+        suffix = f"  ({idx}/{total})" if total > 1 else ""
+        add_header_bar(s,
+                       f"QA × AI — Tools, Frameworks & How-Tos{suffix}",
+                       "Actionable picks for QA leaders — click any title to read the post")
+        accent_stripe(s)
+        top = Inches(1.3)
+        left = Inches(0.7)
+        width = Inches(12.2)
+        for it in chunk:
+            url = it.get("url") or None
+            title = it.get("title", "")
+            what = it.get("what", "")
+            source = it.get("source", "")
+            add_text(s, f"•  {title}", left, top, width, Inches(0.34),
+                     size=14, bold=True, color=NAVY, hyperlink=url)
+            sub_parts = [p for p in [what, f"({source})" if source else ""] if p]
+            sub = "  ".join(sub_parts)
+            add_text(s, sub, left + Inches(0.25), top + Inches(0.32),
+                     width - Inches(0.25), Inches(0.5), size=11, color=MUTED)
+            top += Inches(0.95)
+
+
 def chart_png(fig):
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="white")
@@ -306,7 +336,7 @@ def charts_slide(prs, videos, news_items):
         s.shapes.add_picture(png, Inches(6.8), Inches(1.3), width=Inches(6.2))
 
 
-def sources_slide(prs, stories, vids):
+def sources_slide(prs, stories, vids, qa_items=None):
     s = blank_slide(prs)
     add_header_bar(s, "Sources", "Links for deeper reading")
     accent_stripe(s)
@@ -319,13 +349,17 @@ def sources_slide(prs, stories, vids):
         if v.get("videoId"):
             label = f"[YT · {v.get('channel','')}] {v.get('title','')[:80]}"
             entries.append((label, f"https://youtu.be/{v['videoId']}"))
+    for q in qa_items or []:
+        if q.get("url"):
+            label = f"[QA · {q.get('source','')}] {q.get('title','')[:80]}"
+            entries.append((label, q["url"]))
     if not entries:
         add_text(s, "(no sources this week)", Inches(0.5), Inches(1.4),
                  Inches(12.4), Inches(0.4), size=10, color=MUTED)
         return
-    line_h = Inches(0.38)
-    top = Inches(1.3)
-    for label, url in entries[:14]:
+    line_h = Inches(0.32)
+    top = Inches(1.25)
+    for label, url in entries[:18]:
         add_text(s, label, Inches(0.5), top, Inches(12.4), line_h,
                  size=10, color=NAVY, hyperlink=url)
         top += line_h
@@ -353,10 +387,12 @@ def main():
     top_stories_slides(prs, digest.get("top_stories", []))
     trending_videos_slide(prs, digest.get("trending_videos", []), videos_by_id)
     tools_and_tips_slide(prs, digest.get("tools_and_tips", []))
+    qa_ai_slide(prs, digest.get("qa_ai", []))
     charts_slide(prs, videos_raw, news_raw)
     sources_slide(prs,
                   digest.get("top_stories", []),
-                  digest.get("trending_videos", []))
+                  digest.get("trending_videos", []),
+                  digest.get("qa_ai", []))
 
     out_path = TMP / f"ai_digest_{today.strftime('%Y-%m-%d')}.pptx"
     prs.save(out_path)

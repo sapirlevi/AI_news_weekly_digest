@@ -32,6 +32,9 @@ Output MUST be a single JSON object matching this schema exactly — no prose, n
   ],
   "industry_signals": [                         // 3-5 short trend observations
     {"signal": str, "evidence": str}
+  ],
+  "qa_ai": [                                    // 15-18 candidate items — strict downstream cap to 12 (2 slide pages)
+    {"title": str, "what": str, "source": str, "url": str}
   ]
 }
 
@@ -67,6 +70,19 @@ Rules specific to tools_and_tips:
         - Example: body contains "Webhooks deliver push-based notifications instead of polling" → url: "https://blog.google/.../event-driven-webhooks/#:~:text=push-based%20notifications%20instead%20of%20polling"
         - If the article has no body in the input data, do NOT use it as a tip source — pick a different source instead.
 - Never invent a videoId, an article URL, a phrase, or a timestamp. If you cannot identify a valid grounded source for a candidate tip, drop the tip rather than guessing.
+
+Rules specific to qa_ai:
+- Pull ONLY from the === QA BLOG POSTS === input section. Never use general provider news, YouTube transcripts, or fabricated sources here.
+- Audience is a QA team lead. Keep ONLY actionable items: new QA tools, AI-driven testing frameworks, how-to guides, concrete strategies, hands-on solutions a reader can try at work.
+- DROP think-pieces, "future of QA in the AI era" essays, opinion-only posts, generic "AI is changing testing" articles with no concrete takeaway. If the post is just commentary, drop it.
+- Each item:
+    * "title": the post's actual title (verbatim or minimally rewritten for clarity, <= 90 chars)
+    * "what": one-line summary of WHAT the reader gets — the tool, framework, technique, or strategy (<= 25 words)
+    * "source": the blog name (e.g., "BugRaptors", "Software Testing Weekly", "QASource")
+    * "url": the post URL EXACTLY as it appears in the input — NO #:~:text= fragment, NO ?t= timestamp, NO query params
+- Multiple posts from the same blog ARE allowed when each describes a distinct actionable item.
+- Produce 15-18 candidates so 12+ survive downstream dedup.
+- Never fabricate URLs — only use URLs that appear verbatim in the QA BLOG POSTS input.
 """
 
 
@@ -109,12 +125,23 @@ def load_inputs():
                       if _is_ai_relevant(v["title"], v["description"])]
     dropped_v = len(compact_videos_raw) - len(compact_videos)
 
-    # Cap provider news to top 30 most recent items — 103 items is far more than needed
+    # Split news by category. General provider news uses strict AI relevance;
+    # QA blog posts use the relaxed QA-AI filter.
     all_news = news.get("items", [])
-    sorted_news = sorted(all_news, key=lambda x: x.get("published") or "", reverse=True)[:30]
+    general_news = [n for n in all_news if n.get("category", "general") == "general"]
+    qa_news_raw = [n for n in all_news if n.get("category") == "qa"]
+
+    # Cap provider news to top 30 most recent — 103 items is far more than needed
+    sorted_news = sorted(general_news, key=lambda x: x.get("published") or "", reverse=True)[:30]
     top_news = [n for n in sorted_news
                 if _is_ai_relevant(n.get("title"), n.get("summary"), n.get("body"))]
     dropped_n = len(sorted_news) - len(top_news)
+
+    # Cap QA news to top 50 most recent (14-day window), then filter for AI-QA relevance
+    sorted_qa = sorted(qa_news_raw, key=lambda x: x.get("published") or "", reverse=True)[:50]
+    qa_news = [n for n in sorted_qa
+               if _is_qa_ai_relevant(n.get("title"), n.get("summary"))]
+    dropped_qa = len(sorted_qa) - len(qa_news)
 
     # Topic filter: transcripts
     raw_transcripts = transcripts.get("transcripts", [])
@@ -125,11 +152,13 @@ def load_inputs():
     dropped_t = len(raw_transcripts) - len(filtered_transcripts)
 
     print(f"topic filter: kept {len(compact_videos)} videos (-{dropped_v}), "
-          f"kept {len(top_news)} articles (-{dropped_n}), "
+          f"kept {len(top_news)} general articles (-{dropped_n}), "
+          f"kept {len(qa_news)} qa articles (-{dropped_qa}), "
           f"kept {len(filtered_transcripts)} transcripts (-{dropped_t})")
 
     return {
         "provider_news": top_news,
+        "qa_news": qa_news,
         "videos": compact_videos,
         "transcripts": filtered_transcripts,
         "_balanced_pool": balanced,  # kept for post-cap backfill
@@ -137,6 +166,14 @@ def load_inputs():
 
 
 def build_user_content(payload):
+    # Compact QA items: title + summary + url + source — drop body since QA AI doesn't text-fragment link
+    qa_compact = [{
+        "title": q.get("title", ""),
+        "summary": (q.get("summary") or "")[:400],
+        "url": q.get("url", ""),
+        "source": q.get("provider", ""),
+        "published": q.get("published", ""),
+    } for q in payload.get("qa_news", [])]
     return (
         "Here is this week's raw material. Produce the JSON digest per the system schema.\n\n"
         "=== PROVIDER NEWS ===\n"
@@ -144,7 +181,9 @@ def build_user_content(payload):
         "=== YOUTUBE VIDEOS (pre-balanced: top 3 per channel by like/view ratio, then sorted by views) ===\n"
         f"{json.dumps(payload['videos'], indent=2)[:10000]}\n\n"
         "=== VIDEO TRANSCRIPTS (top-N) ===\n"
-        f"{json.dumps(payload['transcripts'], indent=2)[:30000]}\n"
+        f"{json.dumps(payload['transcripts'], indent=2)[:30000]}\n\n"
+        "=== QA BLOG POSTS (for qa_ai chapter ONLY) ===\n"
+        f"{json.dumps(qa_compact, indent=2)[:12000]}\n"
     )
 
 
@@ -224,6 +263,14 @@ AI_STRONG = {
     "stable diffusion", "midjourney", "higgsfield", "runway", "elevenlabs",
 }
 
+QA_AI_STRONG = {
+    "test automation", "ai testing", "ai-driven testing", "autonomous testing",
+    "self-healing test", "self-healing tests", "test generation", "qa automation",
+    "test agent", "testing agent", "playwright", "selenium", "cypress",
+    "visual testing", "regression testing", "test case generation", "ai qa",
+    "ai-powered testing", "ai-assisted testing", "test framework",
+}
+
 AI_DENY = {
     "n8n", "zapier", "ads", "advertising", "marketing funnel",
     "passive income", "side hustle", "dropshipping", "affiliate marketing",
@@ -259,6 +306,19 @@ def _is_ai_relevant(*texts) -> bool:
     if any(_word_in(kw, blob) for kw in AI_DENY):
         return False
     return any(_word_in(kw, blob) for kw in AI_STRONG)
+
+
+def _is_qa_ai_relevant(*texts) -> bool:
+    """True iff at least one AI_STRONG OR QA_AI_STRONG term matches AND no AI_DENY term matches.
+
+    Relaxed filter for QA blog posts — they're already from QA-focused sources, so
+    we accept either AI tooling vocab or QA-automation vocab.
+    """
+    blob = " ".join((t or "").lower() for t in texts)
+    if any(_word_in(kw, blob) for kw in AI_DENY):
+        return False
+    return (any(_word_in(kw, blob) for kw in AI_STRONG) or
+            any(_word_in(kw, blob) for kw in QA_AI_STRONG))
 
 
 def _looks_like_headline(title: str, what: str) -> bool:
@@ -451,6 +511,68 @@ def dedup_tools_and_tips(items, valid_video_ids, body_by_article_base, transcrip
     return out
 
 
+def dedup_qa_ai(items, valid_qa_url_bases):
+    """Validate QA AI items: URL must be a known QA blog post URL; drop pure
+    headlines; dedup by URL and by title+what token Jaccard.
+
+    Simpler than dedup_tools_and_tips — no text-fragment / timestamp grounding,
+    just basic URL belonging + dupe detection.
+    """
+    out = []
+    seen_token_sets = []
+    seen_urls = set()
+    drops = {}
+
+    for it in items or []:
+        title = it.get("title", "")
+        what = it.get("what", "")
+
+        # Drop pure news headlines — but only if "what" also lacks any tip verb.
+        # QA posts often read like news ("BugRaptors launches X") yet ARE actionable.
+        what_l = what.lower()
+        has_tip_verb = any(_word_in(v, what_l) for v in TIP_VERBS)
+        if _looks_like_headline(title, what) and not has_tip_verb:
+            drops["headline_style"] = drops.get("headline_style", 0) + 1
+            continue
+
+        # URL must belong to a QA blog post we actually scraped
+        url = (it.get("url") or "").split("?")[0].split("#")[0].rstrip("/")
+        if not url or url not in valid_qa_url_bases:
+            drops["bad_url"] = drops.get("bad_url", 0) + 1
+            continue
+
+        # Exact URL dedup
+        if url in seen_urls:
+            drops["url_dupe"] = drops.get("url_dupe", 0) + 1
+            continue
+
+        # Fuzzy title+what dedup (Jaccard >= 0.6)
+        toks = _normalize_tokens(title + " " + what)
+        is_dup = False
+        for prev in seen_token_sets:
+            if not toks or not prev:
+                continue
+            jacc = len(toks & prev) / len(toks | prev)
+            if jacc >= 0.6:
+                is_dup = True
+                break
+        if is_dup:
+            drops["fuzzy_dupe"] = drops.get("fuzzy_dupe", 0) + 1
+            continue
+
+        seen_token_sets.append(toks)
+        seen_urls.add(url)
+        it["url"] = url  # canonicalized (no params/fragments)
+        out.append(it)
+
+    total_dropped = sum(drops.values())
+    drop_detail = ", ".join(f"{k}={v}" for k, v in drops.items()) if drops else "none"
+    print(f"  qa_ai: kept {len(out)}, dropped {total_dropped} ({drop_detail})")
+    if len(out) < 6:
+        print(f"  WARNING: only {len(out)} QA AI items survived — chapter will render <2 pages")
+    return out
+
+
 def call_gemini(payload):
     try:
         from google import genai
@@ -524,11 +646,18 @@ def main():
     # Transcripts include videos not in the balanced pool; allow both as tip sources.
     valid_video_ids = {v["videoId"] for v in payload["videos"]}
     valid_video_ids |= {t["videoId"] for t in payload["transcripts"] if t.get("videoId")}
+    # body_by_article_base only includes GENERAL items so QA URLs cannot land in top_stories
     body_by_article_base = {}
     for n in payload["provider_news"]:
         if n.get("url"):
             base = n["url"].split("?")[0].split("#")[0].rstrip("/")
             body_by_article_base[base] = n.get("body") or ""
+    # QA URL bases — keys for dedup_qa_ai validation
+    valid_qa_url_bases = set()
+    for q in payload.get("qa_news", []):
+        if q.get("url"):
+            valid_qa_url_bases.add(q["url"].split("?")[0].split("#")[0].rstrip("/"))
+
     digest["top_stories"] = sanitize_top_stories(
         digest.get("top_stories"), body_by_article_base,
     )
@@ -539,6 +668,9 @@ def main():
     )
     if len(digest["tools_and_tips"]) > 8:
         digest["tools_and_tips"] = digest["tools_and_tips"][:8]
+    digest["qa_ai"] = dedup_qa_ai(digest.get("qa_ai"), valid_qa_url_bases)
+    if len(digest["qa_ai"]) > 12:
+        digest["qa_ai"] = digest["qa_ai"][:12]
     digest["_meta"] = {"generated_at": now_utc().isoformat(), "usage": usage}
     write_json(TMP / "digest.json", digest)
     print(f"Done. model={usage['model']}  in={usage['prompt_tokens']}  out={usage['output_tokens']}")
