@@ -1,1 +1,1 @@
-/home/sapir_ubuntu/projects/claude-code/shared-tools/firecrawl/firecrawl_crawl.py
+/home/sapir_ubuntu/.claude/tools/firecrawl_crawl.py
