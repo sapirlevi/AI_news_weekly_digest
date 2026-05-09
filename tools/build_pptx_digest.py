@@ -175,11 +175,11 @@ def trending_videos_slide(prs, vids, videos_by_id):
     s = blank_slide(prs)
     add_header_bar(s, "Trending on YouTube", "From your curated channel list")
     accent_stripe(s)
-    # 2x3 grid of cards with thumbnails
-    grid = vids[:6]
+    # 3x3 grid of cards with thumbnails (9 videos)
+    grid = vids[:9]
     col_w = Inches(4.15)
-    row_h = Inches(2.85)
-    gap = Inches(0.12)
+    row_h = Inches(1.9)
+    gap = Inches(0.1)
     start_left = Inches(0.45)
     start_top = Inches(1.25)
     for i, v in enumerate(grid):
@@ -194,29 +194,29 @@ def trending_videos_slide(prs, vids, videos_by_id):
         # thumbnail
         thumb_url = (videos_by_id.get(v.get("videoId", ""), {})
                      .get("thumbnailUrl", ""))
-        thumb_h = Inches(1.35)
+        thumb_h = Inches(0.85)
         if thumb_url:
             try:
                 img = requests.get(thumb_url, timeout=10).content
-                thumb_w = Inches(1.35 * 16 / 9)  # preserve 16:9 aspect at thumb_h
+                thumb_w = Inches(0.85 * 16 / 9)  # preserve 16:9 aspect at thumb_h
                 thumb_left = left + (col_w - thumb_w) / 2
                 s.shapes.add_picture(io.BytesIO(img), thumb_left,
-                                     top + Inches(0.1), height=thumb_h)
+                                     top + Inches(0.08), height=thumb_h)
             except Exception:
                 pass
-        text_top = top + thumb_h + Inches(0.15)
+        text_top = top + thumb_h + Inches(0.18)
         vid_id = v.get("videoId", "")
         yt_url = f"https://youtu.be/{vid_id}" if vid_id else None
-        add_text(s, v.get("title", "")[:90],
-                 left + Inches(0.15), text_top,
-                 col_w - Inches(0.3), Inches(0.55), size=11, bold=True, color=NAVY,
+        add_text(s, v.get("title", "")[:80],
+                 left + Inches(0.12), text_top,
+                 col_w - Inches(0.24), Inches(0.35), size=9, bold=True, color=NAVY,
                  hyperlink=yt_url)
         add_text(s, f"{v.get('channel','')}  ·  {v.get('views',0):,} views",
-                 left + Inches(0.15), text_top + Inches(0.55),
-                 col_w - Inches(0.3), Inches(0.3), size=9, color=MUTED)
-        add_text(s, (v.get("key_takeaway", "") or "")[:120],
-                 left + Inches(0.15), text_top + Inches(0.85),
-                 col_w - Inches(0.3), Inches(0.6), size=9, color=NAVY)
+                 left + Inches(0.12), text_top + Inches(0.35),
+                 col_w - Inches(0.24), Inches(0.2), size=8, color=MUTED)
+        add_text(s, (v.get("key_takeaway", "") or "")[:100],
+                 left + Inches(0.12), text_top + Inches(0.55),
+                 col_w - Inches(0.24), Inches(0.3), size=8, color=NAVY)
 
 
 def tips_slide(prs, title, subtitle, items, formatter):

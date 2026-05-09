@@ -24,7 +24,7 @@ Output MUST be a single JSON object matching this schema exactly — no prose, n
   "top_stories": [                              // 5-8 items, ranked by importance
     {"headline": str, "provider": str, "why_it_matters": str, "url": str}
   ],
-  "trending_videos": [                          // 5-8 items
+  "trending_videos": [                          // 5-9 items, max 2 per channel, from at least 4 different creators when material allows
     {"title": str, "channel": str, "views": int, "key_takeaway": str, "videoId": str}
   ],
   "prompt_tips": [                              // 3-6 items distilled from transcripts
@@ -43,18 +43,45 @@ Rules:
 - Favor items genuinely relevant to someone shipping AI features in production, and to a hobbyist "vibe coder" exploring agents, prompts, and tooling.
 - If a section has no strong material, return fewer items rather than padding.
 - Never fabricate URLs or videoIds — use only what appears in the input data. If unsure, leave url/videoId as "".
+- Trending videos: never include 3 or more videos from the same channel. Aim for at least 4 unique creators.
+- Topic dedup: if two or more candidate videos cover substantially the same topic (same news event, same tool launch, same technique), keep only the one with the highest like_view_ratio and drop the others. Near-duplicates count as duplicates.
 """
+
+
+def _like_view_ratio(v):
+    views = v.get("views") or 0
+    likes = v.get("likes") or 0
+    return round(likes / views, 4) if views > 0 else 0.0
 
 
 def load_inputs():
     news = read_json(TMP / "provider_news.json")
     videos = read_json(TMP / "youtube_videos.json")
     transcripts = read_json(TMP / "transcripts.json")
+
+    raw_videos = videos.get("videos", [])
+
+    # Pre-balance: group by channel, keep top 3 per channel ranked by like/view ratio.
+    # This prevents high-volume channels from flooding Gemini's menu.
+    by_channel = {}
+    for v in raw_videos:
+        by_channel.setdefault(v["channel"], []).append(v)
+    balanced = []
+    for ch_videos in by_channel.values():
+        ch_videos.sort(key=_like_view_ratio, reverse=True)
+        balanced.extend(ch_videos[:3])
+    balanced.sort(key=lambda v: v.get("views", 0) or 0, reverse=True)
+
     compact_videos = [{
-        "videoId": v["videoId"], "title": v["title"], "channel": v["channel"],
-        "views": v.get("views", 0), "publishedAt": v.get("publishedAt"),
+        "videoId": v["videoId"],
+        "title": v["title"],
+        "channel": v["channel"],
+        "views": v.get("views", 0),
+        "like_view_ratio": _like_view_ratio(v),
+        "publishedAt": v.get("publishedAt"),
         "description": (v.get("description") or "")[:300],
-    } for v in videos.get("videos", [])]
+    } for v in balanced]
+
     # Cap provider news to top 30 most recent items — 103 items is far more than needed
     all_news = news.get("items", [])
     top_news = sorted(all_news, key=lambda x: x.get("published") or "", reverse=True)[:30]
@@ -62,6 +89,7 @@ def load_inputs():
         "provider_news": top_news,
         "videos": compact_videos,
         "transcripts": transcripts.get("transcripts", []),
+        "_balanced_pool": balanced,  # kept for post-cap backfill
     }
 
 
@@ -70,11 +98,62 @@ def build_user_content(payload):
         "Here is this week's raw material. Produce the JSON digest per the system schema.\n\n"
         "=== PROVIDER NEWS ===\n"
         f"{json.dumps(payload['provider_news'], indent=2)[:15000]}\n\n"
-        "=== YOUTUBE VIDEOS (ranked by views) ===\n"
+        "=== YOUTUBE VIDEOS (pre-balanced: top 3 per channel by like/view ratio, then sorted by views) ===\n"
         f"{json.dumps(payload['videos'], indent=2)[:10000]}\n\n"
         "=== VIDEO TRANSCRIPTS (top-N) ===\n"
         f"{json.dumps(payload['transcripts'], indent=2)[:30000]}\n"
     )
+
+
+def enforce_channel_cap(digest, pool, max_per_channel=2, target=9):
+    """Hard-cap trending_videos to max_per_channel per channel.
+
+    If the cap prunes below `target`, backfill from the pre-balanced pool
+    using unused videos from channels still under the cap, ranked by
+    like/view ratio. Backfilled entries use their description as a
+    placeholder key_takeaway.
+    """
+    seen_counts = {}
+    kept = []
+    dropped = 0
+    for v in digest.get("trending_videos", []):
+        ch = v.get("channel", "")
+        if seen_counts.get(ch, 0) < max_per_channel:
+            seen_counts[ch] = seen_counts.get(ch, 0) + 1
+            kept.append(v)
+        else:
+            dropped += 1
+
+    chosen_ids = {v.get("videoId") for v in kept}
+    backfilled = 0
+    if len(kept) < target:
+        candidates = [
+            v for v in pool
+            if v.get("videoId") not in chosen_ids
+            and seen_counts.get(v["channel"], 0) < max_per_channel
+        ]
+        candidates.sort(key=_like_view_ratio, reverse=True)
+        for v in candidates:
+            if len(kept) >= target:
+                break
+            ch = v["channel"]
+            if seen_counts.get(ch, 0) >= max_per_channel:
+                continue
+            desc = (v.get("description") or "").strip()
+            takeaway = desc[:160] if desc else v.get("title", "")
+            kept.append({
+                "videoId": v["videoId"],
+                "title": v["title"],
+                "channel": ch,
+                "views": v.get("views", 0),
+                "key_takeaway": takeaway,
+            })
+            seen_counts[ch] = seen_counts.get(ch, 0) + 1
+            backfilled += 1
+
+    digest["trending_videos"] = kept[:target]
+    print(f"  trending_videos: kept {len(kept[:target])}, "
+          f"dropped {dropped} over-cap, backfilled {backfilled}")
 
 
 def call_gemini(payload):
@@ -146,6 +225,7 @@ def call_gemini(payload):
 def main():
     payload = load_inputs()
     digest, usage = call_gemini(payload)
+    enforce_channel_cap(digest, payload["_balanced_pool"])
     digest["_meta"] = {"generated_at": now_utc().isoformat(), "usage": usage}
     write_json(TMP / "digest.json", digest)
     print(f"Done. model={usage['model']}  in={usage['prompt_tokens']}  out={usage['output_tokens']}")
