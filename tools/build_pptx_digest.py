@@ -51,7 +51,7 @@ def blank_slide(prs):
 
 
 def add_text(slide, text, left, top, width, height, *, size=18, bold=False,
-             color=NAVY, align=None):
+             color=NAVY, align=None, hyperlink=None):
     from pptx.enum.text import PP_ALIGN
     box = slide.shapes.add_textbox(left, top, width, height)
     tf = box.text_frame
@@ -65,6 +65,9 @@ def add_text(slide, text, left, top, width, height, *, size=18, bold=False,
     run.font.bold = bold
     run.font.color.rgb = color
     run.font.name = "Calibri"
+    if hyperlink:
+        run.hyperlink.address = hyperlink
+        run.font.underline = True
     return box
 
 
@@ -158,7 +161,8 @@ def top_stories_slides(prs, stories):
                      Inches(4), Inches(0.3), size=11, bold=True, color=ACCENT)
             add_text(s, st.get("headline", ""),
                      Inches(0.8), top + Inches(0.35),
-                     Inches(12), Inches(0.5), size=16, bold=True, color=NAVY)
+                     Inches(12), Inches(0.5), size=16, bold=True, color=NAVY,
+                     hyperlink=st.get("url") or None)
             add_text(s, st.get("why_it_matters", ""),
                      Inches(0.8), top + Inches(0.78),
                      Inches(12), Inches(0.55), size=12, color=MUTED)
@@ -194,14 +198,19 @@ def trending_videos_slide(prs, vids, videos_by_id):
         if thumb_url:
             try:
                 img = requests.get(thumb_url, timeout=10).content
-                s.shapes.add_picture(io.BytesIO(img), left + Inches(0.1),
-                                     top + Inches(0.1), width=col_w - Inches(0.2))
+                thumb_w = Inches(1.35 * 16 / 9)  # preserve 16:9 aspect at thumb_h
+                thumb_left = left + (col_w - thumb_w) / 2
+                s.shapes.add_picture(io.BytesIO(img), thumb_left,
+                                     top + Inches(0.1), height=thumb_h)
             except Exception:
                 pass
         text_top = top + thumb_h + Inches(0.15)
+        vid_id = v.get("videoId", "")
+        yt_url = f"https://youtu.be/{vid_id}" if vid_id else None
         add_text(s, v.get("title", "")[:90],
                  left + Inches(0.15), text_top,
-                 col_w - Inches(0.3), Inches(0.55), size=11, bold=True, color=NAVY)
+                 col_w - Inches(0.3), Inches(0.55), size=11, bold=True, color=NAVY,
+                 hyperlink=yt_url)
         add_text(s, f"{v.get('channel','')}  ·  {v.get('views',0):,} views",
                  left + Inches(0.15), text_top + Inches(0.55),
                  col_w - Inches(0.3), Inches(0.3), size=9, color=MUTED)
@@ -271,16 +280,25 @@ def sources_slide(prs, stories, vids):
     s = blank_slide(prs)
     add_header_bar(s, "Sources", "Links for deeper reading")
     accent_stripe(s)
-    lines = []
+    entries = []
     for st in stories:
         if st.get("url"):
-            lines.append(f"[{st.get('provider','')}] {st.get('headline','')[:90]} — {st['url']}")
+            label = f"[{st.get('provider','')}] {st.get('headline','')[:90]}"
+            entries.append((label, st["url"]))
     for v in vids:
         if v.get("videoId"):
-            lines.append(f"[YT · {v.get('channel','')}] {v.get('title','')[:80]} — "
-                         f"https://youtu.be/{v['videoId']}")
-    add_bullets(s, lines[:14] or ["(no sources this week)"],
-                Inches(0.5), Inches(1.3), Inches(12.4), Inches(5.8), size=10)
+            label = f"[YT · {v.get('channel','')}] {v.get('title','')[:80]}"
+            entries.append((label, f"https://youtu.be/{v['videoId']}"))
+    if not entries:
+        add_text(s, "(no sources this week)", Inches(0.5), Inches(1.4),
+                 Inches(12.4), Inches(0.4), size=10, color=MUTED)
+        return
+    line_h = Inches(0.38)
+    top = Inches(1.3)
+    for label, url in entries[:14]:
+        add_text(s, label, Inches(0.5), top, Inches(12.4), line_h,
+                 size=10, color=NAVY, hyperlink=url)
+        top += line_h
 
 
 def main():

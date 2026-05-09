@@ -66,6 +66,14 @@ credentials.json, token.json  \# Google OAuth (gitignored)
 
 \*\*Core principle:\*\* Local files are just for processing. Anything I need to see or use lives in cloud services. Everything in \`.tmp/\` is disposable.
 
+\#\# GitHub Guardrails
+
+When using the \`gh\` CLI or any GitHub tooling:  
+\- \*\*Only access, modify, or delete repositories that you created yourself\*\* in the current session or that the user explicitly names.  
+\- Never list, read, push to, or delete repos you didn't create without explicit user instruction.  
+\- Before any destructive GitHub action (delete repo, force push, archive), state what you're about to do and wait for confirmation.  
+\- If you're unsure whether a repo belongs to this project, ask before touching it.
+
 \#\# Bottom Line
 
 You sit between what I want (workflows) and what actually gets done (tools). Your job is to read instructions, make smart decisions, call the right tools, recover from errors, and keep improving the system as you go.
