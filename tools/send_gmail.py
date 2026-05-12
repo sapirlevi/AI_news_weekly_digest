@@ -53,6 +53,33 @@ def gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
+def _cookies_warning(digest):
+    """Return an HTML warning banner if transcripts were blocked and tips are empty."""
+    tips_empty = not digest.get("tools_and_tips")
+    transcripts_path = TMP / "transcripts.json"
+    blocked = False
+    if transcripts_path.exists():
+        import json as _json
+        try:
+            meta = _json.loads(transcripts_path.read_text())
+            blocked = meta.get("blocked", False)
+        except Exception:
+            pass
+    if tips_empty and blocked:
+        return (
+            '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:4px;'
+            'padding:12px 16px;margin:16px 0;">'
+            '<b style="color:#856404;">⚠ Action needed: YouTube cookies expired</b><br>'
+            '<span style="color:#533f03;font-size:13px;">'
+            'The Tools &amp; Tips slide is empty this week because YouTube blocked transcript '
+            'fetching — your cookies have likely expired. '
+            'Export fresh cookies from your browser and update the '
+            '<b>YOUTUBE_COOKIES</b> secret in Modal to restore this section.'
+            '</span></div>'
+        )
+    return ""
+
+
 def build_html_body(digest):
     bullets = "".join(f"<li>{b}</li>" for b in digest.get("executive_summary", [])[:5])
     stories = "".join(
@@ -60,9 +87,10 @@ def build_html_body(digest):
         f"<a href='{s.get('url','#')}'>{s.get('headline','')}</a></li>"
         for s in digest.get("top_stories", [])[:5]
     )
+    warning = _cookies_warning(digest)
     return f"""<html><body style="font-family:Calibri,Arial,sans-serif;color:#0B1F3A;max-width:640px;">
 <h2 style="color:#0B1F3A;border-bottom:3px solid #FF6B35;padding-bottom:6px;">AI Industry Weekly</h2>
-<p style="color:#5a5a5a;">The full briefing is attached as a slide deck. Quick preview below.</p>
+{warning}<p style="color:#5a5a5a;">The full briefing is attached as a slide deck. Quick preview below.</p>
 <h3>Executive summary</h3>
 <ul>{bullets or '<li>Quiet week.</li>'}</ul>
 <h3>Top stories</h3>
